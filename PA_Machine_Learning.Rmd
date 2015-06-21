@@ -1,0 +1,118 @@
+---
+title: "PA - Practical Machine Learning"
+author: "Oscar Ochoa"
+date: "19/06/2015"
+output: html_document
+---
+
+# Introduction to the project
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)
+
+# Project Goal
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. We may use any of the other variables to predict with. In the report we will describe how we built the model, how we used cross validation, what we think the expected out of sample error is, and why we made the choices you did. We will use the prediction model to predict 20 different test cases. 
+
+# Performance
+Enable multi-core processing
+```{r}
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+# Getting the Data
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. We are very thankful for their generosity in allowing their data to be used for this project. 
+```{r}
+trainFileUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testFileUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+``` 
+
+We load the data directly to memory, no need to download the files. We will unify all the NA records in the files so we can handle them later on.
+Of course we could have downloaded the data but we have considered the first option more clear for reproduction purposes so we skeptp that part of the code.
+```{r}
+training <- read.csv(url(trainFileUrl),na.string=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testFileUrl),na.string=c("NA","#DIV/0!",""))
+``` 
+
+# Pre-processing and cleaning
+
+We will make several modifications on the data in order to get rid of all variables which aren't providing relevant information to our study based on the type of data, explained variance and missing values. All before setting up the training and validation sets.
+
+1. Remove the 7 first columns because they are irrelevant for the study
+
+```{r}
+training1 <- training[,-c(1:7)]
+``` 
+2. We get rid of those variables with a few unique values so they don't explain much of the variance of the model we are trying to model
+
+```{r}
+library(caret)
+nzv <- nearZeroVar(training1)
+training2 <- training1[, -nzv]
+``` 
+3. We won't be considering variables with more than 60% of NA
+
+```{r}
+longitud <- apply(training2, 2, function(x) length(which(!is.na(x))))
+descarta <- as.vector(ifelse(longitud < 19622*0.6,NA,names(longitud)))
+training3 <- training2[, names(training2) %in% descarta]
+``` 
+4. We make the same 'cleaning' process for the testing data
+
+```{r}
+testing1 <- testing[,-c(1:7)]
+testing2 <- testing1[, -nzv]
+testing3 <- testing2[, names(training2) %in% descarta]
+``` 
+
+5. Now we are going to split the training set in training and testing/validation
+
+```{r}
+library(kernlab)
+inTrain <- createDataPartition(y=training3$classe, p=0.6,list=FALSE)
+trainingSet <- training3[inTrain,]
+testingSet <- training3[-inTrain,]        
+testingSet1 <- testingSet[,-53]
+```
+
+# Training (Decission Tree and Random Forest)
+
+Time for training the model. We will be using Decision Tree...
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(rattle)
+modFit1 <- rpart(classe ~ ., data=trainingSet, method="class")
+#modFit1
+fancyRpartPlot(modFit1)
+predictions1 <- predict(modFit1, testingSet1, type = "class")
+confusionMatrix(predictions1, testingSet$classe)
+```
+
+... and Random Forest
+
+```{r}
+library(randomForest)
+modFit3 <- randomForest(classe ~. , data=trainingSet)
+modFit3
+predictions3 <- predict(modFit3, testingSet1, type = "class")
+confusionMatrix(predictions3, testingSet$classe)
+```
+
+#Function to generate files with predictions to submit for assignment
+
+We will use the model from the Random Forest training for because it gives us a much better prediction in the validations set, so it should work also fine in the testing set provided for the submission.
+
+Added to that the needed files will be created with the following code.
+
+```{r}
+predictionsF <- predict(modFit3, testing3, type = "class")
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predictionsF)
+```
